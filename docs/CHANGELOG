@@ -1,0 +1,40 @@
+v0.03
+
+    2018-09-01
+
+        - improved timer (check every second now)
+        - added tab 4 for timer (tab 3 only for time choice now)
+        - reduced width of the app
+        - fit size of about window
+        - fit size of help window
+
+v0.02
+
+    2018-08-31
+
+        - stresstests but looks good so far
+        - some visual changes
+
+    2018-08-29
+
+        - changed some visuals
+
+    2018-08-27
+
+        - debugging some things
+        - add multi soundfile support
+
+    2018-08-23
+
+        - add tabs
+        - code cleaning
+
+    2018-08-22
+
+        - basic functionality
+
+v0.01
+
+    2017-09-27
+
+        - writing basic app frontend
