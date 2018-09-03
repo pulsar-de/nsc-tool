@@ -1,2 +1,2 @@
-# nsc-tool
+# NSC Tool
 simple timing tool for nsc calls
