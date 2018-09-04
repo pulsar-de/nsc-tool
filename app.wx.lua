@@ -15,11 +15,29 @@
 
 
 -------------------------------------------------------------------------------------------------------------------------------------
+--// INITIAL FUNCS //----------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------
+
+--// make error file
+local errorlog = function( msg )
+    local filename = "ERROR.txt"; local f = io.open( filename, "a" )
+    f:write( ""..os.date( "[%Y-%m-%d / %H:%M Uhr] " ) .. msg .. "\n" ); f:close()
+end
+
+local prequire = function( ... )
+    local status, lib = pcall( require, ... )
+    if ( status ) then return lib end
+    errorlog( lib )
+    return nil
+end
+
+-------------------------------------------------------------------------------------------------------------------------------------
 --// IMPORTS //----------------------------------------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------------------------------------------------------
 
 --// Grundlegende Pfad-Konstanten
-dofile( "data/cfg/const.lua" )
+local CONST_PATH = "data/cfg/const.lua"
+if loadfile( CONST_PATH ) then dofile( CONST_PATH ) else errorlog( "Datei nicht gefunden: " .. CONST_PATH ) return nil end
 
 --// Modul Pfad
 package.path = ";./" .. LUALIB_PATH .. "?.lua" ..
@@ -29,8 +47,8 @@ package.path = ";./" .. LUALIB_PATH .. "?.lua" ..
 package.cpath = ";./" .. CLIB_PATH .. "?.dll"
 
 --// Module importieren
-local wx   = require( "wx" )
-local util = require( "util" )
+local wx   = prequire( "wx" )
+local util = prequire( "util" )
 
 -------------------------------------------------------------------------------------------------------------------------------------
 --// TABLE LOOKUPS //----------------------------------------------------------------------------------------------------------------
@@ -45,7 +63,7 @@ local util_savetable = util.savetable
 
 --// Programm Definitionen
 local app_name         = "NSC Tool"
-local app_version      = "v0.3"
+local app_version      = "v0.4"
 local app_copyright    = "Copyright (C) 2018 by Benjamin Kupka"
 local app_license      = "GNU General Public License Version 3"
 local app_env          = "Environment: " .. wxlua.wxLUA_VERSION_STRING
@@ -60,23 +78,26 @@ local notebook_height  = 391
 local timer_i          = 1000 -- Timer Intervall (60 Sekunden)
 local timer_m          = false -- Timer Modus; false = endless timer / true = one time (oneShot)
 
---// Datenbanken
-local file_cfg         = CFG_PATH .. "cfg.tbl"
-local file_user        = DB_PATH ..  "user.tbl"
-local file_book        = DB_PATH ..  "book.tbl"
-local file_timer       = DB_PATH ..  "timer.tbl"
-
 --// Dateien
-local file_png_gpl     = RES_PATH .. "GPLv3_160x80.png"
-local file_png_osi     = RES_PATH .. "osi_75x100.png"
-local file_png_app_16  = RES_PATH .. "appicon_16x16.png"
-local file_png_app_32  = RES_PATH .. "appicon_32x32.png"
-local file_png_user    = RES_PATH .. "user.png"
-local file_png_phone   = RES_PATH .. "phonebook.png"
-local file_png_clock   = RES_PATH .. "clock.png"
-local file_png_timer   = RES_PATH .. "timer.png"
+local db_tbl = {
 
-local alarm_tbl = {
+    [ 1 ] = CFG_PATH .. "cfg.tbl",
+    [ 2 ] = DB_PATH ..  "user.tbl",
+    [ 3 ] = DB_PATH ..  "book.tbl",
+    [ 4 ] = DB_PATH ..  "timer.tbl",
+}
+local png_tbl = {
+
+    [ 1 ] = RES_PATH .. "GPLv3_160x80.png",
+    [ 2 ] = RES_PATH .. "osi_75x100.png",
+    [ 3 ] = RES_PATH .. "appicon_16x16.png",
+    [ 4 ] = RES_PATH .. "appicon_32x32.png",
+    [ 5 ] = RES_PATH .. "user.png",
+    [ 6 ] = RES_PATH .. "phonebook.png",
+    [ 7 ] = RES_PATH .. "clock.png",
+    [ 8 ] = RES_PATH .. "timer.png",
+}
+local audio_tbl = {
 
     [ 1 ] = { RES_PATH .. "AlarmClock.mp3", "AlarmClock" },
     [ 2 ] = { RES_PATH .. "AnalogWatch.mp3", "AnalogWatch" },
@@ -90,10 +111,10 @@ local alarm_tbl = {
 }
 
 --// Datenbanken importieren
-local cfg_tbl          = util_loadtable( file_cfg )
-local user_tbl         = util_loadtable( file_user )
-local book_tbl         = util_loadtable( file_book )
-local timer_tbl        = util_loadtable( file_timer )
+local cfg_tbl   = util_loadtable( db_tbl[ 1 ] ) or {}
+local user_tbl  = util_loadtable( db_tbl[ 2 ] ) or {}
+local book_tbl  = util_loadtable( db_tbl[ 3 ] ) or {}
+local timer_tbl = util_loadtable( db_tbl[ 4 ] ) or {}
 
 --// Fonts
 local default_font     = wx.wxFont( 8,  wx.wxMODERN, wx.wxNORMAL, wx.wxNORMAL, false, "Verdana" )
@@ -120,7 +141,9 @@ local get_current_time_infos
 local user_listbox
 local time_listbox
 local alarmtime_done  = ""
-
+local volume_slider
+local slider_range = 100
+local exec = true
 
 -------------------------------------------------------------------------------------------------------------------------------------
 --// IDS //--------------------------------------------------------------------------------------------------------------------------
@@ -133,6 +156,59 @@ local new_id = function() id_counter = id_counter + 1; return id_counter end
 --// IDs
 ID_mb_settings = new_id()
 ID_mb_tutorial = new_id()
+ID_volume = new_id()
+
+-------------------------------------------------------------------------------------------------------------------------------------
+--// Helper Funktionen #2 //---------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------
+
+--// Error Window
+local show_error_window = function( err )
+    di = wx.wxMessageDialog(
+        wx.NULL,
+        "Folgende Datei kann nicht gefunden werden:\n\n" ..
+        "[ " .. err .. " ]\n\n" ..
+        "Programm wird beendet.\n" ..
+        "Bitte neu Downloaden.",
+        "FEHLER",
+        wx.wxOK + wx.wxICON_ERROR + wx.wxCENTRE
+    )
+    result = di:ShowModal(); di:Destroy()
+    if result == wx.wxID_OK then
+        errorlog( "Datei nicht gefunden: " .. err )
+        if event then event:Skip() end
+        if timer then timer:Stop(); timer:delete(); timer = nil end
+        if frame then frame:Destroy() end
+        exec = false
+        return nil
+    end
+end
+
+--// check if files exists
+local check_files_exists = function( tbl )
+    for k, v in ipairs( tbl ) do
+        if type( v ) ~= "table" then
+            if not wx.wxFile.Exists( v ) then
+                return show_error_window( v )
+            end
+        else
+            if not wx.wxFile.Exists( v[ 1 ] ) then
+                return show_error_window( v[ 1 ] )
+            end
+        end
+    end
+end
+
+check_files_exists( png_tbl )
+check_files_exists( audio_tbl )
+
+--// Dateien speichern
+local save = function( config, user, book, timer )
+    if config then util_savetable( cfg_tbl, "cfg_tbl", db_tbl[ 1 ] ) end
+    if user then util_savetable( user_tbl, "user_tbl", db_tbl[ 2 ] ) end
+    if book then util_savetable( book_tbl, "book_tbl", db_tbl[ 3 ] ) end
+    if timer then util_savetable( timer_tbl, "timer_tbl", db_tbl[ 4 ] ) end
+end
 
 -------------------------------------------------------------------------------------------------------------------------------------
 --// MENUBAR //----------------------------------------------------------------------------------------------------------------------
@@ -168,8 +244,8 @@ menu_bar:Append( help_menu, "Hilfe" )
 
 --// App Icons (Titelbar & Taskbar)
 local app_icons = wx.wxIconBundle()
-app_icons:AddIcon( wx.wxIcon( file_png_app_16, wx.wxBITMAP_TYPE_PNG, 16, 16 ) )
-app_icons:AddIcon( wx.wxIcon( file_png_app_32, wx.wxBITMAP_TYPE_PNG, 32, 32 ) )
+app_icons:AddIcon( wx.wxIcon( png_tbl[ 3 ], wx.wxBITMAP_TYPE_PNG, 16, 16 ) )
+app_icons:AddIcon( wx.wxIcon( png_tbl[ 4 ], wx.wxBITMAP_TYPE_PNG, 32, 32 ) )
 
 --// Hauptframe
 local frame = wx.wxFrame( wx.NULL, wx.wxID_ANY, app_name .. " " .. app_version, wx.wxPoint( 0, 0 ), wx.wxSize( app_width, app_height ), wx.wxMINIMIZE_BOX + wx.wxSYSTEM_MENU + wx.wxCAPTION + wx.wxCLOSE_BOX + wx.wxCLIP_CHILDREN )
@@ -185,7 +261,7 @@ frame:SetStatusText( "Timer: AUS", 1 )
 local panel = wx.wxPanel( frame, wx.wxID_ANY, wx.wxPoint( 0, 0 ), wx.wxSize( app_width, app_height ) )
 
 --// Loading Media
-local mediaCtrl = wx.wxMediaCtrl( frame, wx.wxID_ANY, "", wx.wxDefaultPosition, wx.wxSize( 0, 0 ) )
+local media_ctrl = wx.wxMediaCtrl( frame, wx.wxID_ANY, "", wx.wxDefaultPosition, wx.wxSize( 0, 0 ) )
 
 -------------------------------------------------------------------------------------------------------------------------------------
 --// Notebook //---------------------------------------------------------------------------------------------------------------------
@@ -194,19 +270,19 @@ local mediaCtrl = wx.wxMediaCtrl( frame, wx.wxID_ANY, "", wx.wxDefaultPosition, 
 local notebook_image_list = wx.wxImageList( 16, 16 )
 
 --// Icon Tab 1 - Profile
-local bmp_user_16x16 = wx.wxBitmap():ConvertToImage(); bmp_user_16x16:LoadFile( file_png_user )
+local bmp_user_16x16 = wx.wxBitmap():ConvertToImage(); bmp_user_16x16:LoadFile( png_tbl[ 5 ] )
 local tab_1_img = notebook_image_list:Add( wx.wxBitmap( bmp_user_16x16 ) )
 
 --// Icon Tab 2 - Telefonbuch
-local bmp_phone_16x16 = wx.wxBitmap():ConvertToImage(); bmp_phone_16x16:LoadFile( file_png_phone )
+local bmp_phone_16x16 = wx.wxBitmap():ConvertToImage(); bmp_phone_16x16:LoadFile( png_tbl[ 6 ] )
 local tab_2_img = notebook_image_list:Add( wx.wxBitmap( bmp_phone_16x16 ) )
 
 --// Icon Tab 3 - Uhrzeiten
-local bmp_clock_16x16 = wx.wxBitmap():ConvertToImage(); bmp_clock_16x16:LoadFile( file_png_clock )
+local bmp_clock_16x16 = wx.wxBitmap():ConvertToImage(); bmp_clock_16x16:LoadFile( png_tbl[ 7 ] )
 local tab_3_img = notebook_image_list:Add( wx.wxBitmap( bmp_clock_16x16 ) )
 
 --// Icon Tab 3 - Timer
-local bmp_timer_16x16 = wx.wxBitmap():ConvertToImage(); bmp_timer_16x16:LoadFile( file_png_timer )
+local bmp_timer_16x16 = wx.wxBitmap():ConvertToImage(); bmp_timer_16x16:LoadFile( png_tbl[ 8 ] )
 local tab_4_img = notebook_image_list:Add( wx.wxBitmap( bmp_timer_16x16 ) )
 
 --// Notebook
@@ -308,7 +384,7 @@ local show_alert_window = function( time, book_name, book_number )
 
     --// App Logo
     local app_logo = wx.wxBitmap():ConvertToImage()
-    app_logo:LoadFile( file_png_app_32 )
+    app_logo:LoadFile( png_tbl[ 4 ] )
 
     control = wx.wxStaticBitmap( di_tim, wx.wxID_ANY, wx.wxBitmap( app_logo ), wx.wxPoint( 0, 20 ), wx.wxSize( app_logo:GetWidth(), app_logo:GetHeight() ) )
     control:Centre( wx.wxHORIZONTAL )
@@ -353,28 +429,20 @@ local show_alert_window = function( time, book_name, book_number )
     --// Event - Button "OK"
     btn_close:Connect( wx.wxID_ANY, wx.wxEVT_COMMAND_BUTTON_CLICKED,
     function( event )
-        media_control( mediaCtrl, "stop" ) -- mode: "play" "pause" "stop"
+        media_control( media_ctrl, "stop" ) -- mode: "play" "pause" "stop"
         di_tim:Destroy()
     end )
 
     --// Alarm Ton abspielen
-    media_control( mediaCtrl, "play" ) -- mode: "play" "pause" "stop"
+    media_control( media_ctrl, "play" ) -- mode: "play" "pause" "stop"
 
     --// Dialog anzeigen
     di_tim:ShowModal()
 end
 
 -------------------------------------------------------------------------------------------------------------------------------------
---// Diverse Helper Funktionen //----------------------------------------------------------------------------------------------------
+--// Helper Funktionen #2 //---------------------------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------------------------------------------------------
-
---// Dateien speichern
-local save = function( config, user, book, timer )
-    if config then util_savetable( cfg_tbl, "cfg_tbl", file_cfg ) end
-    if user then util_savetable( user_tbl, "user_tbl", file_user ) end
-    if book then util_savetable( book_tbl, "book_tbl", file_book ) end
-    if timer then util_savetable( timer_tbl, "timer_tbl", file_timer ) end
-end
 
 --// check if table key exists
 local tbl_key_exists = function( tbl, key )
@@ -383,16 +451,28 @@ end
 
 --// load current signalton from table
 local load_current_signaltone_selection = function()
-    local file, choice
+    local file, choice, volume
+    local need_save = false
     if tbl_key_exists( cfg_tbl, "signaltone" ) then
         choice = cfg_tbl[ "signaltone" ] - 1
-        file = alarm_tbl[ choice + 1 ][ 1 ]
+        file = audio_tbl[ choice + 1 ][ 1 ]
     else
-        cfg_tbl[ "signaltone" ] = 1
-        file = alarm_tbl[ cfg_tbl[ "signaltone" ] ][ 2 ]
+        cfg_tbl[ "signaltone" ] = 2
+        file = audio_tbl[ cfg_tbl[ "signaltone" ] ][ 2 ]
+        need_save = true
+    end
+    if tbl_key_exists( cfg_tbl, "volume" ) then
+        volume = cfg_tbl[ "volume" ]
+    else
+        volume = 1
+        cfg_tbl[ "volume" ] = volume
+        need_save = true
+    end
+    media_ctrl:Load( file )
+    media_ctrl:SetVolume( volume )
+    if need_save then
         save( true, false, false, false ) -- config, user, phonebook, timer
     end
-    mediaCtrl:Load( file )
 end
 
 load_current_signaltone_selection()
@@ -514,51 +594,86 @@ local show_settings_window = function( frame )
         wx.wxID_ANY,
         "Einstellungen",
         wx.wxDefaultPosition,
-        wx.wxSize( 155, 280 ),
+        wx.wxSize( 155, 340 ),
         wx.wxSTAY_ON_TOP + wx.wxDEFAULT_DIALOG_STYLE - wx.wxCLOSE_BOX - wx.wxMAXIMIZE_BOX - wx.wxMINIMIZE_BOX
     )
     di_set:SetBackgroundColour( wx.wxColour( 255, 255, 255 ) )
-    di_set:SetMinSize( wx.wxSize( 155, 280 ) )
-    di_set:SetMaxSize( wx.wxSize( 155, 280 ) )
+    di_set:SetMinSize( wx.wxSize( 155, 340 ) )
+    di_set:SetMaxSize( wx.wxSize( 155, 340 ) )
 
 	--// wxRadioBox - Signalton
-	alarm_radio = wx.wxRadioBox( di_set, wx.wxID_ANY, "Signalton", wx.wxPoint( 10, 10 ), wx.wxSize( 127, 200 ), alarm_arr( alarm_tbl ), 1, wx.wxSUNKEN_BORDER )
+	alarm_radio = wx.wxRadioBox(
+        di_set,
+        wx.wxID_ANY,
+        "Signalton",
+        wx.wxPoint( 10, 10 ),
+        wx.wxSize( 127, 200 ),
+        alarm_arr( audio_tbl ),
+        1,
+        wx.wxSUNKEN_BORDER
+    )
 
     local current_radio_choice = cfg_tbl[ "signaltone" ] - 1
     alarm_radio:SetSelection( current_radio_choice )
-    local current_radio_choice_file = alarm_tbl[ current_radio_choice + 1 ][ 1 ]
-    mediaCtrl:Load( current_radio_choice_file )
+    local current_radio_choice_file = audio_tbl[ current_radio_choice + 1 ][ 1 ]
+    media_ctrl:Load( current_radio_choice_file )
 
 	--// Event - wxRadioBox - Signalton
 	alarm_radio:Connect( wx.wxID_ANY, wx.wxEVT_COMMAND_RADIOBOX_SELECTED,
 	function( event )
         local choice = alarm_radio:GetSelection() + 1
-        local file = alarm_tbl[ choice ][ 1 ]
-        mediaCtrl:Load( file )
+        local file = audio_tbl[ choice ][ 1 ]
+        media_ctrl:Load( file )
 	end )
 
+    --// Border
+    control = wx.wxStaticBox( di_set, wx.wxID_ANY, "Lautstärke", wx.wxPoint( 10, 220 ), wx.wxSize( 127, 45 ) )
+
+    --// wxSlider - Volumebar
+    volume_slider = wx.wxSlider(
+        di_set,
+        ID_volume,
+        slider_range,
+        0,
+        slider_range,
+        wx.wxPoint( 15, 235 ),
+        wx.wxSize( 117, 25 ),
+        wx.wxSL_HORIZONTAL
+    )
+
+    local current_volume = cfg_tbl[ "volume" ]
+    volume_slider:SetValue( current_volume * slider_range )
+
+    di_set:Connect( ID_volume, wx.wxEVT_SCROLL_THUMBRELEASE,
+    function( event )
+        local pos = event:GetPosition()
+        media_ctrl:SetVolume( pos / slider_range )
+    end )
+
     --// Button "Test"
-    local settings_btn_test = wx.wxButton( di_set, wx.wxID_ANY, "Test", wx.wxPoint( 12, 220 ), wx.wxSize( 60, 20 ) )
+    local settings_btn_test = wx.wxButton( di_set, wx.wxID_ANY, "Test", wx.wxPoint( 12, 280 ), wx.wxSize( 60, 20 ) )
     settings_btn_test:SetBackgroundColour( wx.wxColour( 255, 255, 255 ) )
 
     --// Event - Button "Test"
     settings_btn_test:Connect( wx.wxID_ANY, wx.wxEVT_COMMAND_BUTTON_CLICKED,
     function( event )
-        media_control( mediaCtrl, "play" ) -- mode: "play" "pause" "stop"
+        media_control( media_ctrl, "play" ) -- mode: "play" "pause" "stop"
     end )
 
     --// Button "OK"
-    local settings_btn_ok = wx.wxButton( di_set, wx.wxID_ANY, "OK", wx.wxPoint( 75, 220 ), wx.wxSize( 60, 20 ) )
+    local settings_btn_ok = wx.wxButton( di_set, wx.wxID_ANY, "OK", wx.wxPoint( 75, 280 ), wx.wxSize( 60, 20 ) )
     settings_btn_ok:SetBackgroundColour( wx.wxColour( 255, 255, 255 ) )
 
     --// Event - Button "OK"
     settings_btn_ok:Connect( wx.wxID_ANY, wx.wxEVT_COMMAND_BUTTON_CLICKED,
     function( event )
         local choice = alarm_radio:GetSelection() + 1
+        local volume = media_ctrl:GetVolume()
         cfg_tbl[ "signaltone" ] = choice
+        cfg_tbl[ "volume" ] = volume
         save( true, false, false, false ) -- config, user, phonebook, timer
-        frame:SetStatusText( "Neuer Signalton: " .. alarm_tbl[ choice ][ 2 ], 0 )
-        media_control( mediaCtrl, "stop" ) -- mode: "play" "pause" "stop"
+        frame:SetStatusText( "Neuer Signalton: " .. audio_tbl[ choice ][ 2 ], 0 )
+        media_control( media_ctrl, "stop" ) -- mode: "play" "pause" "stop"
         di_set:Destroy()
     end )
 
@@ -586,7 +701,7 @@ local show_about_window = function( frame )
 
     --// App Logo
     local app_logo = wx.wxBitmap():ConvertToImage()
-    app_logo:LoadFile( file_png_app_32 )
+    app_logo:LoadFile( png_tbl[ 4 ] )
 
     control = wx.wxStaticBitmap( di_abo, wx.wxID_ANY, wx.wxBitmap( app_logo ), wx.wxPoint( 0, 15 ), wx.wxSize( app_logo:GetWidth(), app_logo:GetHeight() ) )
     control:Centre( wx.wxHORIZONTAL )
@@ -623,7 +738,7 @@ local show_about_window = function( frame )
 
     --// GPL Logo
     local gpl_logo = wx.wxBitmap():ConvertToImage()
-    gpl_logo:LoadFile( file_png_gpl )
+    gpl_logo:LoadFile( png_tbl[ 1 ] )
 
     control = wx.wxStaticBitmap( di_abo, wx.wxID_ANY, wx.wxBitmap( gpl_logo ), wx.wxPoint( 20, 220 ), wx.wxSize( gpl_logo:GetWidth(), gpl_logo:GetHeight() ) )
     --control:Centre( wx.wxHORIZONTAL )
@@ -631,7 +746,7 @@ local show_about_window = function( frame )
 
     --// OSI Logo
     local osi_logo = wx.wxBitmap():ConvertToImage()
-    osi_logo:LoadFile( file_png_osi )
+    osi_logo:LoadFile( png_tbl[ 2 ] )
 
     control = wx.wxStaticBitmap( di_abo, wx.wxID_ANY, wx.wxBitmap( osi_logo ), wx.wxPoint( 200, 210 ), wx.wxSize( osi_logo:GetWidth(), osi_logo:GetHeight() ) )
     --control:Centre( wx.wxHORIZONTAL )
@@ -672,7 +787,7 @@ local show_tutorial_window = function( frame )
 
     --// App Logo
     local app_logo = wx.wxBitmap():ConvertToImage()
-    app_logo:LoadFile( file_png_app_32 )
+    app_logo:LoadFile( png_tbl[ 4 ] )
 
     control = wx.wxStaticBitmap( di_tut, wx.wxID_ANY, wx.wxBitmap( app_logo ), wx.wxPoint( 0, 15 ), wx.wxSize( app_logo:GetWidth(), app_logo:GetHeight() ) )
     control:Centre( wx.wxHORIZONTAL )
@@ -1221,6 +1336,13 @@ end )
 ]]
 
 -------------------------------------------------------------------------------------------------------------------------------------
+--// FILECHECK //--------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------
+
+--check_files_exists( png_tbl )
+--check_files_exists( audio_tbl )
+
+-------------------------------------------------------------------------------------------------------------------------------------
 --// MAIN LOOP //--------------------------------------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------------------------------------------------------
 
@@ -1236,35 +1358,41 @@ function( event )
 end )
 
 main = function()
-    frame:Show( true )
-    frame:Connect( wx.wxEVT_CLOSE_WINDOW,
-    function( event )
-        --// Dialog Fenster
-        di = wx.wxMessageDialog( frame, "Wirklich beenden?", "Hinweis", wx.wxYES_NO + wx.wxICON_QUESTION + wx.wxCENTRE )
-        result = di:ShowModal(); di:Destroy()
-        if result == wx.wxID_YES then
-            event:Skip()
-            if timer then timer:Stop(); timer:delete(); timer = nil end
-            frame:Destroy()
-        end
-    end )
-    --// menu bar events
-    frame:Connect( wx.wxID_EXIT, wx.wxEVT_COMMAND_MENU_SELECTED,
-    function( event )
-        frame:Close( true )
-    end )
-    frame:Connect( ID_mb_settings, wx.wxEVT_COMMAND_MENU_SELECTED,
-    function( event )
-        show_settings_window( frame )
-    end )
-    frame:Connect( wx.wxID_ABOUT, wx.wxEVT_COMMAND_MENU_SELECTED,
-    function( event )
-        show_about_window( frame )
-    end )
-    frame:Connect( ID_mb_tutorial, wx.wxEVT_COMMAND_MENU_SELECTED,
-    function( event )
-        show_tutorial_window( frame )
-    end )
+    if exec then
+        frame:Show( true )
+        frame:Connect( wx.wxEVT_CLOSE_WINDOW,
+        function( event )
+            --// Dialog Fenster
+            di = wx.wxMessageDialog( frame, "Wirklich beenden?", "Hinweis", wx.wxYES_NO + wx.wxICON_QUESTION + wx.wxCENTRE )
+            result = di:ShowModal(); di:Destroy()
+            if result == wx.wxID_YES then
+                event:Skip()
+                if timer then timer:Stop(); timer:delete(); timer = nil end
+                frame:Destroy()
+            end
+        end )
+        --// menu bar events
+        frame:Connect( wx.wxID_EXIT, wx.wxEVT_COMMAND_MENU_SELECTED,
+        function( event )
+            frame:Close( true )
+        end )
+        frame:Connect( ID_mb_settings, wx.wxEVT_COMMAND_MENU_SELECTED,
+        function( event )
+            show_settings_window( frame )
+        end )
+        frame:Connect( wx.wxID_ABOUT, wx.wxEVT_COMMAND_MENU_SELECTED,
+        function( event )
+            show_about_window( frame )
+        end )
+        frame:Connect( ID_mb_tutorial, wx.wxEVT_COMMAND_MENU_SELECTED,
+        function( event )
+            show_tutorial_window( frame )
+        end )
+    else
+        if event then event:Skip() end
+        if timer then timer:Stop(); timer:delete(); timer = nil end
+        if frame then frame:Destroy() end
+    end
 end
 
 main()
