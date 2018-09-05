@@ -2,8 +2,6 @@ local cfg_tbl
 
 cfg_tbl = {
 
-    [ "signaltone" ] = 2,
-
 }
 
 return cfg_tbl

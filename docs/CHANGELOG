@@ -1,3 +1,17 @@
+v0.4
+
+    2018-09-05
+
+        - code cleaning
+        - clean sort from as local deklared vars, controls and functions
+        - using english comments
+        - check if the selected profile has any times on timer start
+
+    2018-09-04
+
+        - added volumebar to settings window
+        - check if files exists
+
 v0.3
 
     2018-09-01
