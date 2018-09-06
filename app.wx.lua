@@ -48,7 +48,7 @@ local util_savetable = util.savetable
 
 --// app vars
 local app_name         = "NSC Tool"
-local app_version      = "v0.4"
+local app_version      = "v0.5"
 local app_copyright    = "Copyright (C) 2018 by Benjamin Kupka"
 local app_license      = "GNU General Public License Version 3"
 local app_env          = "Environment: " .. wxlua.wxLUA_VERSION_STRING
@@ -60,12 +60,14 @@ local app_height       = 470
 local notebook_width   = app_width - 6
 local notebook_height  = app_height - 79
 
+--// do not touch
 local timer_i          = 1000 -- timer Intervall (1 second)
 local timer_m          = false -- timer mode; false = endless timer / true = one time (oneShot)
-
 local alarmtime_done   = ""
 local slider_range     = 100
 local exec             = true
+local gauge_max_range  = 100
+local gauge_seconds    = 0
 
 --// files
 local db_tbl = {
@@ -114,7 +116,8 @@ local timer_bold       = wx.wxFont( 14, wx.wxMODERN, wx.wxNORMAL, wx.wxFONTWEIGH
 local timer_bold_2     = wx.wxFont( 18, wx.wxMODERN, wx.wxNORMAL, wx.wxFONTWEIGHT_BOLD, false, "Verdana" )
 local timer_bold_3     = wx.wxFont( 22, wx.wxMODERN, wx.wxNORMAL, wx.wxFONTWEIGHT_BOLD, false, "Verdana" )
 local timer_list       = wx.wxFont( 10, wx.wxMODERN, wx.wxNORMAL, wx.wxFONTWEIGHT_BOLD, false, "Verdana" )
-local timer_status     = wx.wxFont( 13,  wx.wxMODERN, wx.wxNORMAL, wx.wxFONTWEIGHT_BOLD, false, "Verdana" )
+local timer_status     = wx.wxFont( 13, wx.wxMODERN, wx.wxNORMAL, wx.wxFONTWEIGHT_BOLD, false, "Verdana" )
+local timer_choice     = wx.wxFont( 9,  wx.wxMODERN, wx.wxNORMAL, wx.wxFONTWEIGHT_BOLD, false, "Verdana" )
 local timer_btn        = wx.wxFont( 18, wx.wxMODERN, wx.wxNORMAL, wx.wxNORMAL, false, "Verdana" )
 local alarm_btn        = wx.wxFont( 18, wx.wxMODERN, wx.wxNORMAL, wx.wxFONTWEIGHT_BOLD, false, "Verdana" )
 
@@ -144,6 +147,9 @@ local time_del_button -- tab 3
 local status_textctrl -- tab 4
 local timer_start_button -- tab 4
 local timer_stop_button -- tab 4
+local timer_current_profile -- tab 4
+local timer_remaining_time -- tab 4
+local timer_gauge -- tab 4
 
 --// functions
 local new_id
@@ -163,6 +169,7 @@ local sorted_array_book
 local sorted_array_audio
 local check_time
 local check_book
+local get_next_time
 local menu_item
 local show_alert_window
 local show_about_window
@@ -423,6 +430,45 @@ check_book = function( name, num )
         return false, false, err
     end
     return name, num, err
+end
+
+--// get the remaining time as string
+get_next_time = function( timer_tbl, user )
+    if ( user ~= "" or user ~= nil ) then
+        if not tbl_is_empty( timer_tbl ) then
+            local seconds_to_wait = 99999999999
+            local time_next = ""
+            local t_day   = os.date("%d")
+            local t_month = os.date("%m")
+            local t_year  = os.date("%Y")
+            for names, v in pairs( timer_tbl ) do
+                if names == user then
+                    for tTime, tbl in pairs( v ) do
+                        local t_hour = tTime:sub( 1, 2 )
+                        local t_min  = tTime:sub( 4, 5 )
+                        local t_time = os.time( { year = t_year, month = t_month, day = t_day, hour = t_hour, min = t_min } )
+                        local seconds = os.difftime( t_time, os.time() )
+                        if type( seconds ) == "number" then
+                            if ( seconds > 0 ) and ( seconds < seconds_to_wait ) then
+                                seconds_to_wait = seconds
+                                time_next = tTime
+                            end
+                        end
+                    end
+                end
+            end
+            local d, h, m, s = util.formatseconds( seconds_to_wait )
+            local h_var, m_var, s_var
+            if h == 1 then h_var = " Stunde, " else h_var = " Stunden, " end
+            if m == 1 then m_var = " Minute, " else m_var = " Minuten, " end
+            if s == 1 then s_var = " Sekunde"  else s_var = " Sekunden"  end
+            return time_next, h .. h_var .. m .. m_var .. s .. s_var, seconds_to_wait
+        else
+            return "?", "?"
+        end
+    else
+        return "?", "?"
+    end
 end
 
 -------------------------------------------------------------------------------------------------------------------------------------
@@ -889,6 +935,10 @@ add_user = function( newuser_textctrl, user_listbox )
         -- tab 4 changes
         status_textctrl:SetForegroundColour( wx.wxColour( 255, 0, 0 ) )
         status_textctrl:SetValue( ">  D E A K T I V I E R T  <" )
+        timer_current_profile:SetValue( "" )
+        timer_next_time:SetValue( "" )
+        timer_remaining_time:SetValue( "" )
+        timer_gauge:SetValue( 0 )
         timer_start_button:Enable( true )
         timer_stop_button:Disable()
         -- timer
@@ -929,6 +979,10 @@ del_user = function( newuser_textctrl, user_listbox )
             -- tab 4 changes
             status_textctrl:SetForegroundColour( wx.wxColour( 255, 0, 0 ) )
             status_textctrl:SetValue( ">  D E A K T I V I E R T  <" )
+            timer_current_profile:SetValue( "" )
+            timer_next_time:SetValue( "" )
+            timer_remaining_time:SetValue( "" )
+            timer_gauge:SetValue( 0 )
             timer_start_button:Enable( true )
             timer_stop_button:Disable()
             -- timer
@@ -1210,6 +1264,10 @@ add_time = function( user, newtime_textctrl, time_listbox, book_name, book_numbe
             -- tab 4 changes
             status_textctrl:SetForegroundColour( wx.wxColour( 255, 0, 0 ) )
             status_textctrl:SetValue( ">  D E A K T I V I E R T  <" )
+            timer_current_profile:SetValue( "" )
+            timer_next_time:SetValue( "" )
+            timer_remaining_time:SetValue( "" )
+            timer_gauge:SetValue( 0 )
             timer_start_button:Enable( true )
             timer_stop_button:Disable()
             -- timer
@@ -1246,7 +1304,11 @@ del_time = function( user, newtime_textctrl, time_listbox )
         time_listbox:SetSelection( 0 )
         -- tab 4 changes
         status_textctrl:SetForegroundColour( wx.wxColour( 255, 0, 0 ) )
-        status_textctrl:SetValue( ">  D E A K T I V I E R T  <"
+        status_textctrl:SetValue( ">  D E A K T I V I E R T  <" )
+        timer_current_profile:SetValue( "" )
+        timer_next_time:SetValue( "" )
+        timer_remaining_time:SetValue( "" )
+        timer_gauge:SetValue( 0 )
         timer_start_button:Enable( true )
         timer_stop_button:Disable()
         -- timer
@@ -1336,31 +1398,60 @@ end )
 -------------------------------------------------------------------------------------------------------------------------------------
 
 --// border
-control = wx.wxStaticBox( tab_4, wx.wxID_ANY, "Timer Status", wx.wxPoint( 50, 85 ), wx.wxSize( 290, 167 ) )
+control = wx.wxStaticBox( tab_4, wx.wxID_ANY, "Timer Status", wx.wxPoint( 50, 15 ), wx.wxSize( 290, 309 ) )
 
 --// status_textctrl
-status_textctrl = wx.wxTextCtrl( tab_4, wx.wxID_ANY, "", wx.wxPoint( 62, 105 ), wx.wxSize( 266, 28 ), wx.wxTE_READONLY + wx.wxTE_CENTRE )-- + wx.wxNO_BORDER )
+status_textctrl = wx.wxTextCtrl( tab_4, wx.wxID_ANY, "", wx.wxPoint( 62, 35 ), wx.wxSize( 266, 28 ), wx.wxTE_READONLY + wx.wxTE_CENTRE )-- + wx.wxNO_BORDER )
 status_textctrl:SetBackgroundColour( wx.wxColour( 40, 40, 40 ) )
 status_textctrl:SetFont( timer_status )
 status_textctrl:SetForegroundColour( wx.wxColour( 255, 0, 0 ) )
 status_textctrl:SetValue( ">  D E A K T I V I E R T  <" )
 
 --// button - Timer start
-timer_start_button = wx.wxButton( tab_4, wx.wxID_ANY, "START", wx.wxPoint( 62, 143 ), wx.wxSize( 130, 98 ) )
+timer_start_button = wx.wxButton( tab_4, wx.wxID_ANY, "START", wx.wxPoint( 62, 73 ), wx.wxSize( 130, 98 ) )
 timer_start_button:SetBackgroundColour( wx.wxColour( 180, 180, 180 ) )
 timer_start_button:SetFont( timer_btn )
 
 --// button - Timer stop
-timer_stop_button = wx.wxButton( tab_4, wx.wxID_ANY, "STOP", wx.wxPoint( 197, 143 ), wx.wxSize( 130, 98 ) )
+timer_stop_button = wx.wxButton( tab_4, wx.wxID_ANY, "STOP", wx.wxPoint( 197, 73 ), wx.wxSize( 130, 98 ) )
 timer_stop_button:SetBackgroundColour( wx.wxColour( 180, 180, 180 ) )
 timer_stop_button:SetFont( timer_btn )
 timer_stop_button:Disable()
+
+--// text
+control = wx.wxStaticText( tab_4, wx.wxID_ANY, "Ausgewähltes Profil", wx.wxPoint( 65, 193 ) )
+
+--// timer_current_profile
+timer_current_profile = wx.wxTextCtrl( tab_4, wx.wxID_ANY, "", wx.wxPoint( 62, 207 ), wx.wxSize( 266, 22 ), wx.wxTE_READONLY + wx.wxTE_CENTRE + wx.wxSUNKEN_BORDER )
+timer_current_profile:SetFont( timer_choice )
+timer_current_profile:SetBackgroundColour( wx.wxColour( 210, 210, 210 ) )
+
+--// text
+control = wx.wxStaticText( tab_4, wx.wxID_ANY, "Nächste Uhrzeit", wx.wxPoint( 65, 233 ) )
+
+--// timer_next_time
+timer_next_time = wx.wxTextCtrl( tab_4, wx.wxID_ANY, "", wx.wxPoint( 62, 247 ), wx.wxSize( 266, 22 ), wx.wxTE_READONLY + wx.wxTE_CENTRE + wx.wxSUNKEN_BORDER )
+timer_next_time:SetFont( timer_choice )
+timer_next_time:SetBackgroundColour( wx.wxColour( 210, 210, 210 ) )
+
+--// text
+control = wx.wxStaticText( tab_4, wx.wxID_ANY, "Verbleibende Zeit", wx.wxPoint( 65, 273 ) )
+
+--// timer_remaining_time
+timer_remaining_time = wx.wxTextCtrl( tab_4, wx.wxID_ANY, "", wx.wxPoint( 62, 287 ), wx.wxSize( 266, 22 ), wx.wxTE_READONLY + wx.wxTE_CENTRE + wx.wxSUNKEN_BORDER )
+timer_remaining_time:SetFont( timer_choice )
+timer_remaining_time:SetBackgroundColour( wx.wxColour( 210, 210, 210 ) )
+
+--// timer_gauge
+timer_gauge = wx.wxGauge( tab_4, wx.wxID_ANY, gauge_max_range, wx.wxPoint( 63, 307 ), wx.wxSize( 264, 5 ), wx.wxGA_HORIZONTAL + wx.wxGA_SMOOTH )
 
 --// event - timer_start_button
 timer_start_button:Connect( wx.wxID_ANY, wx.wxEVT_COMMAND_BUTTON_CLICKED,
 function( event )
     local choice = tonumber( user_choice:GetCurrentSelection() )
     local user = user_choice:GetStringSelection()
+    local time_next, time_remaining, seconds = get_next_time( timer_tbl, user )
+    gauge_seconds = 0
     local any_time_exists = false
     if choice == -1 then
         -- dialog
@@ -1379,6 +1470,9 @@ function( event )
             timer_stop_button:Enable( true )
             status_textctrl:SetForegroundColour( wx.wxColour( 80, 240, 114 ) )
             status_textctrl:SetValue( ">     A K T I V I E R T     <" )
+            timer_current_profile:SetValue( user )
+            timer_gauge:SetRange( seconds )
+            timer_gauge:SetValue( gauge_seconds )
             -- timer
             set_timer( true, false ) -- mode: timer on/off (bool); dialog: send dialog if timer is off (bool)
         else
@@ -1397,6 +1491,10 @@ function( event )
     timer_stop_button:Disable()
     status_textctrl:SetForegroundColour( wx.wxColour( 255, 0, 0 ) )
     status_textctrl:SetValue( ">  D E A K T I V I E R T  <" )
+    timer_current_profile:SetValue( "" )
+    timer_next_time:SetValue( "" )
+    timer_remaining_time:SetValue( "" )
+    timer_gauge:SetValue( 0 )
     -- timer
     set_timer( false, false ) -- mode: timer on/off (bool); dialog: send dialog if timer is off (bool)
 end )
@@ -1431,10 +1529,17 @@ function( event )
     local t = os.date( "%H:%M" )
     local user = user_choice:GetStringSelection()
     local book_name, book_number = get_current_time_infos( t, user )
+    local time_next, time_remaining, seconds = get_next_time( timer_tbl, user )
     if book_name then
         show_alert_window( t, book_name, book_number )
+        gauge_seconds = 0
+        timer_gauge:SetRange( seconds )
     end
     status_blink( status_textctrl )
+    timer_next_time:SetValue( time_next )
+    timer_remaining_time:SetValue( time_remaining )
+    timer_gauge:SetValue( gauge_seconds )
+    gauge_seconds = gauge_seconds + 1
 end )
 
 main = function()

@@ -1,3 +1,15 @@
+v0.5
+
+    2018-09-06
+
+        - added next timer
+        - added remaining time to tab 4
+        - added gauge for remaining tim in tab 4
+
+    2018-09-05
+
+        - added textcontrol for selected profile in tab 4
+
 v0.4
 
     2018-09-05
@@ -47,7 +59,7 @@ v0.2
 
         - basic functionality
 
-v0.01
+v0.1
 
     2017-09-27
 
