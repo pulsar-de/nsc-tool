@@ -2,6 +2,12 @@ local cfg_tbl
 
 cfg_tbl = {
 
+    [ "signaltone" ] = 2,
+    [ "taskbar" ] = true,
+    [ "time" ] = {
+    },
+    [ "volume" ] = 1,
+
 }
 
 return cfg_tbl
